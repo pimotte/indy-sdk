@@ -77,7 +77,7 @@ class Anoncreds {
 		String claimJson = createClaimResult.getClaimJson();
 
 		//10. Prover store Claim
-		proverStoreClaim(proverWallet, claimJson).get();
+		proverStoreClaim(proverWallet, claimJson, null).get();
 
 		//11. Prover gets Claims for Proof Request
 		String proofRequestJson = "{\n" +
