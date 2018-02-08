@@ -1,6 +1,5 @@
-import jdk.nashorn.internal.ir.debug.JSONWriter;
+import org.hyperledger.indy.sdk.IndyException;
 import org.hyperledger.indy.sdk.crypto.Crypto;
-import org.hyperledger.indy.sdk.did.Did;
 import org.hyperledger.indy.sdk.did.DidResults;
 import org.hyperledger.indy.sdk.pool.Pool;
 import org.hyperledger.indy.sdk.wallet.Wallet;
@@ -8,18 +7,14 @@ import org.json.JSONObject;
 import utils.PoolUtils;
 
 import java.nio.charset.Charset;
-import java.util.AbstractMap;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.util.concurrent.ExecutionException;
 
+import static org.hyperledger.indy.sdk.anoncreds.Anoncreds.issuerCreateAndStoreClaimDef;
 import static org.hyperledger.indy.sdk.did.Did.createAndStoreMyDid;
 import static org.hyperledger.indy.sdk.did.Did.keyForDid;
-import static org.hyperledger.indy.sdk.ledger.Ledger.buildNymRequest;
-import static org.hyperledger.indy.sdk.ledger.Ledger.signAndSubmitRequest;
+import static org.hyperledger.indy.sdk.ledger.Ledger.*;
 
 public class GettingStarted {
 
@@ -40,10 +35,40 @@ public class GettingStarted {
 
         DidResults.CreateAndStoreMyDidResult stewartDidAndVerkey = createAndStoreMyDid(stewartWallet, "{\"seed\": \"000000000000000000000000Steward1\"}").get();
 
+        System.out.println("Getting Trust Anchor credentials - Government Onboarding");
         OnboardingResult governmentOnboarding = onboard(pool, poolName, "Sovrin Steward", stewartWallet, stewartDidAndVerkey.getDid(), "Government", null, "government_wallet", "TRUST_ANCHOR");
 
-        System.out.println(governmentOnboarding);
+        System.out.println("Getting Trust Anchor credentials - Faber Onboarding");
+        OnboardingResult faberOnboarding = onboard(pool, poolName, "Sovrin Steward", stewartWallet, stewartDidAndVerkey.getDid(), "Faber", null, "faber_wallet", "TRUST_ANCHOR");
 
+        System.out.println("Getting Trust Anchor credentials - Acme Onboarding");
+        OnboardingResult acmeOnboarding = onboard(pool, poolName, "Sovrin Steward", stewartWallet, stewartDidAndVerkey.getDid(), "Acme", null, "acme_wallet", "TRUST_ANCHOR");
+
+        System.out.println("Getting Trust Anchor credentials - Thrift Onboarding");
+        OnboardingResult thriftOnboarding = onboard(pool, poolName, "Sovrin Steward", stewartWallet, stewartDidAndVerkey.getDid(), "Thrift", null, "thrift_wallet", "TRUST_ANCHOR");
+
+
+        System.out.println("Onboarding finished, proceeding to claim schema setup");
+
+        DidResults.CreateAndStoreMyDidResult govDidAndVerkey = createAndStoreMyDid(governmentOnboarding.getToWallet(), "{\"seed\": \"000000000000000000000Government1\"}").get();
+
+
+        sendSchema(pool, governmentOnboarding.getToWallet(), govDidAndVerkey.getDid(), createSchema("Transcript", "1.2",
+                "first_name", "last_name", "degree", "status", "year", "average", "ssn")).get();
+
+        sendSchema(pool, governmentOnboarding.getToWallet(), govDidAndVerkey.getDid(), createSchema("Job-Certificate", "0.2",
+                "first_name", "last_name", "salary", "employee_status", "experience")).get();
+
+
+        System.out.println("Proceeding to Faber publishing a Claim Definition");
+
+        DidResults.CreateAndStoreMyDidResult faberDidAndVerkey = createAndStoreMyDid(faberOnboarding.getToWallet(), "{\"seed\": \"00000000000000000000000000Faber1\"}").get();
+
+        Object schema = getSchema(pool, faberOnboarding.getToWallet(), faberDidAndVerkey.getDid(), govDidAndVerkey.getDid(), createGetSchema("Transcript", "1.2")).get();
+
+        System.out.println("SCHEMA: " + schema);
+
+        issuerCreateAndStoreClaimDef(faberOnboarding.getToWallet(), faberDidAndVerkey.getDid(), schema.toString(), "RC", false);
     }
 
     static OnboardingResult onboard(Pool pool, String poolName, String from,  Wallet fromWallet, String fromDid, String to,  Wallet toWallet, String toWalletName, String role) throws Exception {
@@ -58,7 +83,7 @@ public class GettingStarted {
         sendNym(pool, fromWallet, fromDid, fromToDidAndKey.getDid(), fromToDidAndKey.getVerkey(), null).get();
 
         if (toWallet == null) {
-            System.out.printf("\"%s\" -> Creating wallet", toWalletName);
+            System.out.printf("\"%s\" -> Creating wallet", to);
             Wallet.createWallet(poolName, toWalletName, "default", null, null).get();
             toWallet = Wallet.openWallet(toWalletName, null, null).get();
         }
@@ -94,6 +119,35 @@ public class GettingStarted {
     static CompletableFuture<String> sendNym(Pool pool, Wallet wallet, String did, String newDid, String newKey, String role) throws Exception {
         String nymRequest = buildNymRequest(did, newDid, newKey, null, role).get();
         return signAndSubmitRequest(pool, wallet, did, nymRequest);
+    }
+
+    static String createSchema(String name, String version, String... attributeNames) {
+        Map<String, Object> json = new HashMap<>();
+
+        json.put("name", name);
+        json.put("version", version);
+        json.put("attr_names", Arrays.asList(attributeNames));
+
+        return new JSONObject(json).toString();
+    }
+
+    static CompletableFuture<String> sendSchema(Pool pool, Wallet wallet, String did, String schema) throws IndyException, ExecutionException, InterruptedException {
+        String schemaRequest = buildSchemaRequest(did, schema).get();
+        return signAndSubmitRequest(pool, wallet, did, schemaRequest);
+    }
+
+    static String createGetSchema(String name, String version) {
+        Map<String, Object> json = new HashMap<>();
+
+        json.put("name", name);
+        json.put("version", version);
+
+        return new JSONObject(json).toString();
+    }
+
+    static CompletableFuture<Object> getSchema(Pool pool, Wallet wallet, String submitterdDid, String destinationDid, String request) throws Exception {
+        String getSchemaRequest = buildGetSchemaRequest(submitterdDid, destinationDid, request).get();
+        return signAndSubmitRequest(pool, wallet, submitterdDid, getSchemaRequest).thenApply(rawJson -> new JSONObject(rawJson).get("result"));
     }
 
     static class OnboardingResult {
