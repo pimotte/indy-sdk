@@ -83,11 +83,6 @@ public class GettingStarted {
                 "first_name", "last_name", "salary", "employee_status", "experience")).get();
 
 
-        System.out.println("Allow schema's to settle");
-        Thread.sleep(3000);
-        Instant schemaCreation = Instant.now();
-        Thread.sleep(1000);
-
         System.out.println("'Faber' -> Create and store in Wallet 'Faber Issuer' DID");
         DidResults.CreateAndStoreMyDidResult faberIssuer = createAndStoreMyDid(faberOnboarding.getToWallet(), "{}").get();
 
@@ -96,13 +91,7 @@ public class GettingStarted {
 
         System.out.println("\"Faber\" -> Get \"Transcript\" Schema from Ledger");
 
-        Object transcriptSchema = getSchema(pool, faberOnboarding.getToWallet(), faberIssuer.getDid(), faberIssuer.getDid(), createGetSchema("Transcript", "1.2")).get();
-
-        Instant stateProofTime =Instant.ofEpochSecond(((JSONObject) transcriptSchema).getJSONObject("state_proof").getJSONObject("multi_signature").getJSONObject("value").getInt("timestamp"));
-
-        System.out.println("STATE_PROOF: " + stateProofTime);
-
-        System.out.println(stateProofTime.isAfter(schemaCreation));
+        Object transcriptSchema = getSchema(pool, faberOnboarding.getToWallet(), faberIssuer.getDid(), governmentIssuer.getDid(), createGetSchema("Transcript", "1.2")).get();
 
         System.out.println("\"Faber\" -> Create and store in Wallet \"Faber Transcript\" Claim Definition");
         createAndSendClaimDef(pool, faberOnboarding.getToWallet(), faberIssuer, transcriptSchema.toString());
@@ -116,7 +105,7 @@ public class GettingStarted {
 
         System.out.println("\"Acme\" -> Get \"Job-Certificate\" Schema from Ledger");
 
-        Object jobCertSchema = getSchema(pool, acmeOnboarding.getToWallet(), acmeIssuer.getDid(), acmeIssuer.getDid(), createGetSchema("Job-Certificate", "0.2")).get();
+        Object jobCertSchema = getSchema(pool, acmeOnboarding.getToWallet(), acmeIssuer.getDid(), governmentIssuer.getDid(), createGetSchema("Job-Certificate", "0.2")).get();
 
         System.out.println("\"Acme\" -> Create and store in Wallet \"Acme Job-Certificate\" Claim Definition");
         createAndSendClaimDef(pool, acmeOnboarding.getToWallet(), acmeIssuer, jobCertSchema.toString());
@@ -125,6 +114,8 @@ public class GettingStarted {
         System.out.println("Getting Transcript with Faber");
         System.out.println("Getting Transcript with Faber - Onboarding");
         OnboardingResult aliceOnboarding = onboard(pool, poolName, "Faber", faberOnboarding.getToWallet(), faberDid, "Alice", null, "alice_wallet");
+
+
 
     }
 
