@@ -1,4 +1,5 @@
 import org.hyperledger.indy.sdk.IndyException;
+import org.hyperledger.indy.sdk.anoncreds.Anoncreds;
 import org.hyperledger.indy.sdk.crypto.Crypto;
 import org.hyperledger.indy.sdk.crypto.CryptoResults;
 import org.hyperledger.indy.sdk.did.DidResults;
@@ -14,7 +15,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
-import static org.hyperledger.indy.sdk.anoncreds.Anoncreds.issuerCreateAndStoreClaimDef;
+import static org.hyperledger.indy.sdk.anoncreds.Anoncreds.*;
 import static org.hyperledger.indy.sdk.did.Did.createAndStoreMyDid;
 import static org.hyperledger.indy.sdk.did.Did.keyForDid;
 import static org.hyperledger.indy.sdk.ledger.Ledger.*;
@@ -91,7 +92,7 @@ public class GettingStarted {
 
         System.out.println("\"Faber\" -> Get \"Transcript\" Schema from Ledger");
 
-        Object transcriptSchema = getSchema(pool, faberOnboarding.getToWallet(), faberIssuer.getDid(), governmentIssuer.getDid(), createGetSchema("Transcript", "1.2")).get();
+        Object transcriptSchema = getSchema(pool, faberIssuer.getDid(), governmentIssuer.getDid(), createGetSchema("Transcript", "1.2")).get();
 
         System.out.println("\"Faber\" -> Create and store in Wallet \"Faber Transcript\" Claim Definition");
         createAndSendClaimDef(pool, faberOnboarding.getToWallet(), faberIssuer, transcriptSchema.toString());
@@ -105,7 +106,7 @@ public class GettingStarted {
 
         System.out.println("\"Acme\" -> Get \"Job-Certificate\" Schema from Ledger");
 
-        Object jobCertSchema = getSchema(pool, acmeOnboarding.getToWallet(), acmeIssuer.getDid(), governmentIssuer.getDid(), createGetSchema("Job-Certificate", "0.2")).get();
+        Object jobCertSchema = getSchema(pool, acmeIssuer.getDid(), governmentIssuer.getDid(), createGetSchema("Job-Certificate", "0.2")).get();
 
         System.out.println("\"Acme\" -> Create and store in Wallet \"Acme Job-Certificate\" Claim Definition");
         createAndSendClaimDef(pool, acmeOnboarding.getToWallet(), acmeIssuer, jobCertSchema.toString());
@@ -115,17 +116,69 @@ public class GettingStarted {
         System.out.println("Getting Transcript with Faber - Onboarding");
         OnboardingResult aliceOnboarding = onboard(pool, poolName, "Faber", faberOnboarding.getToWallet(), faberDid, "Alice", null, "alice_wallet");
 
+        System.out.println("'Faber' -> Create 'Transcript' Claim offer for Alice");
+        JSONObject transcriptClaimOffer = createClaimOffer(faberIssuer.getDid(), governmentIssuer.getDid(), "Transcript", "1.2");
+
+        System.out.println("'Faber' -> Authcrypt 'Transcript' Claim Offer for Alice");
+        byte[] authcryptedClaimOffer = Crypto.authCrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), aliceOnboarding.getToFromDidAndKey().getVerkey(), transcriptClaimOffer.toString().getBytes(Charset.forName("utf8"))).get();
+
+        System.out.println("'Faber' -> Send authcrypted 'Transcript' Claim Offer to Alice");
+
+        System.out.println("'Alice' -> Authdecrypted 'Transcript' Claim Offer from Faber");
+        CryptoResults.AuthDecryptResult authDecryptClaimOfferResult = Crypto.authDecrypt(aliceOnboarding.getToWallet(), aliceOnboarding.getToFromDidAndKey().getVerkey(), authcryptedClaimOffer).get();
+
+        System.out.println("'Alice' -> Store 'Transcript' Claim Offer in Wallet from Faber");
+        proverStoreClaimOffer(aliceOnboarding.getToWallet(), new String(authDecryptClaimOfferResult.getDecryptedMessage(), Charset.forName("utf8"))).get();
+
+        System.out.println("'Alice' -> Create and store 'Alice' Master Secret in Wallet");
+        String aliceMasterSecretName = "alice_master_secret";
+        proverCreateMasterSecret(aliceOnboarding.getToWallet(), aliceMasterSecretName);
+
+        JSONObject transcriptClaimOfferJson = new JSONObject(new String(authDecryptClaimOfferResult.getDecryptedMessage(), Charset.forName("utf8")));
+
+        System.out.println("'Alice' -> Get 'Transcript' Schema from Ledger");
+        JSONObject claimSchema = getSchemaByKey(pool, aliceOnboarding.getToFromDidAndKey().getDid(), transcriptClaimOfferJson.getJSONObject("schema_key")).get();
+
+        System.out.println("TRANSCRIPT_CLAIM_OFFER" + transcriptClaimOffer.toString());
+
+        System.out.println("'Alice' -> Get 'Faber Transcript' Claim Definition from Ledger");
+        JSONObject faberTranscriptClaimDef = getClaimDef(pool, aliceOnboarding.getToFromDidAndKey().getDid(), claimSchema, transcriptClaimOfferJson.getString("issuer_did"));
+
+        System.out.println("CLAIM DEF: " + faberTranscriptClaimDef.toString());
+
+        System.out.println("'Alice' -> Create and store in Wallet 'Transcript' Claim Request for Faber");
+        String transcriptClaimRequestJson = proverCreateAndStoreClaimReq(aliceOnboarding.getToWallet(), aliceOnboarding.getToFromDidAndKey().getDid(), transcriptClaimOfferJson.toString(), faberTranscriptClaimDef.toString(), aliceMasterSecretName).get();
+
+        System.out.println("'Alice' -> Authcrypt 'Transcript' Claim request for Faber");
+        byte[] authcryptedTranscriptClaimRequest = Crypto.authCrypt(aliceOnboarding.getToWallet(), aliceOnboarding.getToFromDidAndKey().getVerkey(), aliceOnboarding.getFromToKey(), transcriptClaimRequestJson.getBytes(Charset.forName("utf8"))).get();
+
+        System.out.println("'Alice' -> Send authcrypted 'Transcript' Claim Request to Faber");
+
+        System.out.println("'Faber' -> Authdecrypt 'Transcript' Claim Request from Alice");
+        CryptoResults.AuthDecryptResult authdecryptedTranscriptClaimRequest = Crypto.authDecrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), authcryptedTranscriptClaimRequest).get();
+
+
 
 
     }
 
+    private static JSONObject getClaimDef(Pool pool, String did, JSONObject schema, String issuerDid) throws Exception {
+        System.out.println("Starting getClaimDef");
+        System.out.println("SCHEMA" + schema.toString());
+        System.out.println("issuerDid " + issuerDid);
+        String claimDefTxn = buildGetClaimDefTxn(did, schema.getInt("seqNo"), "CL", issuerDid).get();
+        String claimDefResponse = submitRequest(pool, claimDefTxn).get();
+        return new JSONObject(claimDefResponse).getJSONObject("result");
 
-    private static JSONObject getClaimOffer(String issuerDid, String name, String version) {
+    }
+
+
+    private static JSONObject createClaimOffer(String offerIssuerDid, String schemaIssuerDid, String name, String version) {
         JSONObject claimOffer = new JSONObject();
-        claimOffer.put("issuer_did", issuerDid);
+        claimOffer.put("issuer_did", offerIssuerDid);
 
         Map<String, String> schemaKey = new HashMap<>();
-        schemaKey.put("did", issuerDid);
+        schemaKey.put("did", schemaIssuerDid);
         schemaKey.put("name", name);
         schemaKey.put("version", version);
 
@@ -253,9 +306,16 @@ public class GettingStarted {
         return new JSONObject(json).toString();
     }
 
-    static CompletableFuture<Object> getSchema(Pool pool, Wallet wallet, String submitterdDid, String destinationDid, String request) throws Exception {
+
+    static CompletableFuture<JSONObject> getSchemaByKey(Pool pool, String submitterDid, JSONObject schemaKey) throws Exception {
+        return getSchema(pool, submitterDid, schemaKey.getString("did"), createGetSchema(schemaKey.getString("name"), schemaKey.getString("version")));
+    }
+    static CompletableFuture<JSONObject> getSchema(Pool pool, String submitterdDid, String destinationDid, String request) throws Exception {
+        System.out.println("destinationDid " + destinationDid);
+        System.out.println("request " + request);
+
         String getSchemaRequest = buildGetSchemaRequest(submitterdDid, destinationDid, request).get();
-        return signAndSubmitRequest(pool, wallet, submitterdDid, getSchemaRequest).thenApply(rawJson -> new JSONObject(rawJson).get("result"));
+        return submitRequest(pool, getSchemaRequest).thenApply(rawJson -> new JSONObject(rawJson).getJSONObject("result"));
     }
 
 
