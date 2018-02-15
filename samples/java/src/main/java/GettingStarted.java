@@ -118,15 +118,18 @@ public class GettingStarted {
         OnboardingResult aliceOnboarding = onboard(pool, poolName, "Faber", faberOnboarding.getToWallet(), faberDid, "Alice", null, "alice_wallet");
 
         System.out.println("'Faber' -> Create 'Transcript' Claim offer for Alice");
-        JSONObject transcriptClaimOffer = createClaimOffer(faberIssuer.getDid(), governmentIssuer.getDid(), "Transcript", "1.2");
+
+        String transcriptClaimOffer = issuerCreateClaimOffer(faberOnboarding.getToWallet(), transcriptSchema.toString(), faberIssuer.getDid(), aliceOnboarding.getToFromDidAndKey().getDid()).get();
 
         System.out.println("'Faber' -> Authcrypt 'Transcript' Claim Offer for Alice");
-        byte[] authcryptedClaimOffer = Crypto.authCrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), aliceOnboarding.getToFromDidAndKey().getVerkey(), transcriptClaimOffer.toString().getBytes(Charset.forName("utf8"))).get();
+        byte[] authcryptedClaimOffer = Crypto.authCrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), aliceOnboarding.getToFromDidAndKey().getVerkey(), transcriptClaimOffer.getBytes(Charset.forName("utf8"))).get();
 
         System.out.println("'Faber' -> Send authcrypted 'Transcript' Claim Offer to Alice");
 
         System.out.println("'Alice' -> Authdecrypted 'Transcript' Claim Offer from Faber");
         CryptoResults.AuthDecryptResult authDecryptClaimOfferResult = Crypto.authDecrypt(aliceOnboarding.getToWallet(), aliceOnboarding.getToFromDidAndKey().getVerkey(), authcryptedClaimOffer).get();
+
+        System.out.println(new String(authDecryptClaimOfferResult.getDecryptedMessage(), Charset.forName("utf8")));
 
         System.out.println("'Alice' -> Store 'Transcript' Claim Offer in Wallet from Faber");
         proverStoreClaimOffer(aliceOnboarding.getToWallet(), new String(authDecryptClaimOfferResult.getDecryptedMessage(), Charset.forName("utf8"))).get();
@@ -139,8 +142,6 @@ public class GettingStarted {
 
         System.out.println("'Alice' -> Get 'Transcript' Schema from Ledger");
         JSONObject claimSchema = getSchemaByKey(pool, aliceOnboarding.getToFromDidAndKey().getDid(), transcriptClaimOfferJson.getJSONObject("schema_key")).get();
-
-        System.out.println("TRANSCRIPT_CLAIM_OFFER" + transcriptClaimOffer.toString());
 
         System.out.println("'Alice' -> Get 'Faber Transcript' Claim Definition from Ledger");
         JSONObject faberTranscriptClaimDef = getClaimDef(pool, aliceOnboarding.getToFromDidAndKey().getDid(), claimSchema, transcriptClaimOfferJson.getString("issuer_did"));
@@ -171,18 +172,10 @@ public class GettingStarted {
         claimValuesWithNew(transcriptClaimValues, "year", "2015", "2015");
         claimValuesWithNew(transcriptClaimValues, "average", "5", "5");
 
-        System.out.println("TranscriptClaimValues " + transcriptClaimValues.toString());
-        System.out.println("authdecryptedTranscriptClaimRequestJson " + authdecryptedTranscriptClaimRequestJson);
-        String dummyTranscriptClaim = "{\"ssn\": [\"123-45-6789\", \"3124141231422543541\"], \"first_name\": [\"Alice\", \"1139481716457488690172217916278103335\"], \"last_name\": [\"Garcia\", \"5321642780241790123587902456789123452\"], \"degree\": [\"Bachelor of Science, Marketing\", \"12434523576212321\"], \"status\": [\"graduated\", \"2213454313412354\"], \"year\": [\"2015\", \"2015\"], \"average\": [\"5\", \"5\"]}";
-
-
-
         String transcriptClaimJson = issuerCreateClaim(faberOnboarding.getToWallet(), authdecryptedTranscriptClaimRequestJson, transcriptClaimValues.toString(), -1).get().getClaimJson();
 
-        AnoncredsResults.IssuerCreateClaimResult issuerCreateClaimResult = issuerCreateClaim(faberOnboarding.getToWallet(), authdecryptedTranscriptClaimRequestJson, transcriptClaimJson, -1).get();
-
         System.out.println("'Faber' -> Authcrypt 'Transcript' Claim to Alice");
-        byte[] authcryptedIssuerCreateClaimResult = Crypto.authCrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), aliceOnboarding.getToFromDidAndKey().getVerkey(), issuerCreateClaimResult.getClaimJson().getBytes(Charset.forName("utf8"))).get();
+        byte[] authcryptedIssuerCreateClaimResult = Crypto.authCrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), aliceOnboarding.getToFromDidAndKey().getVerkey(), transcriptClaimJson.getBytes(Charset.forName("utf8"))).get();
 
         System.out.println("'Faber' -> Send authcrypted 'Transcript' Claim to Alice");
 
