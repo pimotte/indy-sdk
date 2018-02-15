@@ -1,5 +1,6 @@
 import org.hyperledger.indy.sdk.IndyException;
 import org.hyperledger.indy.sdk.anoncreds.Anoncreds;
+import org.hyperledger.indy.sdk.anoncreds.AnoncredsResults;
 import org.hyperledger.indy.sdk.crypto.Crypto;
 import org.hyperledger.indy.sdk.crypto.CryptoResults;
 import org.hyperledger.indy.sdk.did.DidResults;
@@ -157,8 +158,40 @@ public class GettingStarted {
         System.out.println("'Faber' -> Authdecrypt 'Transcript' Claim Request from Alice");
         CryptoResults.AuthDecryptResult authdecryptedTranscriptClaimRequest = Crypto.authDecrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), authcryptedTranscriptClaimRequest).get();
 
+        String authdecryptedTranscriptClaimRequestJson =new String(authdecryptedTranscriptClaimRequest.getDecryptedMessage(), Charset.forName("utf8"));
+
+        System.out.println("'Faber' -> Create 'Transcript' Claim for Alice");
+        JSONObject transcriptClaimValues = new JSONObject();
+
+        claimValuesWithNew(transcriptClaimValues, "first_name", "Alice", "1139481716457488690172217916278103335");
+        claimValuesWithNew(transcriptClaimValues, "last_name", "Garcia", "5321642780241790123587902456789123452");
+        claimValuesWithNew(transcriptClaimValues, "degree", "Bachelor of Science, Marketing", "12434523576212321");
+        claimValuesWithNew(transcriptClaimValues, "status", "graduated", "2213454313412354");
+        claimValuesWithNew(transcriptClaimValues, "ssn", "123-45-6789", "3124141231422543541");
+        claimValuesWithNew(transcriptClaimValues, "year", "2015", "2015");
+        claimValuesWithNew(transcriptClaimValues, "average", "5", "5");
+
+        System.out.println("TranscriptClaimValues " + transcriptClaimValues.toString());
+        System.out.println("authdecryptedTranscriptClaimRequestJson " + authdecryptedTranscriptClaimRequestJson);
+        String dummyTranscriptClaim = "{\"ssn\": [\"123-45-6789\", \"3124141231422543541\"], \"first_name\": [\"Alice\", \"1139481716457488690172217916278103335\"], \"last_name\": [\"Garcia\", \"5321642780241790123587902456789123452\"], \"degree\": [\"Bachelor of Science, Marketing\", \"12434523576212321\"], \"status\": [\"graduated\", \"2213454313412354\"], \"year\": [\"2015\", \"2015\"], \"average\": [\"5\", \"5\"]}";
 
 
+
+        String transcriptClaimJson = issuerCreateClaim(faberOnboarding.getToWallet(), authdecryptedTranscriptClaimRequestJson, transcriptClaimValues.toString(), -1).get().getClaimJson();
+
+        AnoncredsResults.IssuerCreateClaimResult issuerCreateClaimResult = issuerCreateClaim(faberOnboarding.getToWallet(), authdecryptedTranscriptClaimRequestJson, transcriptClaimJson, -1).get();
+
+        System.out.println("'Faber' -> Authcrypt 'Transcript' Claim to Alice");
+        byte[] authcryptedIssuerCreateClaimResult = Crypto.authCrypt(faberOnboarding.getToWallet(), aliceOnboarding.getFromToKey(), aliceOnboarding.getToFromDidAndKey().getVerkey(), issuerCreateClaimResult.getClaimJson().getBytes(Charset.forName("utf8"))).get();
+
+        System.out.println("'Faber' -> Send authcrypted 'Transcript' Claim to Alice");
+
+        System.out.println("'Alice' -> Authdecrypted 'Transcript' Claim from Faber");
+        byte[] authDecryptIssuerCreateClaimResult = Crypto.authDecrypt(aliceOnboarding.getToWallet(), aliceOnboarding.getToFromDidAndKey().getVerkey(), authcryptedIssuerCreateClaimResult).get().getDecryptedMessage();
+
+
+        System.out.println("'Alice' -> Store 'Transcript' Claim for Faber");
+        proverStoreClaim(aliceOnboarding.getToWallet(), new String(authDecryptIssuerCreateClaimResult, Charset.forName("utf8")), null).get();
 
     }
 
@@ -170,6 +203,10 @@ public class GettingStarted {
         String claimDefResponse = submitRequest(pool, claimDefTxn).get();
         return new JSONObject(claimDefResponse).getJSONObject("result");
 
+    }
+
+    private static void claimValuesWithNew(JSONObject base, String key, String actualValue, String integerValue) {
+        base.put(key, Arrays.asList(actualValue, integerValue));
     }
 
 
