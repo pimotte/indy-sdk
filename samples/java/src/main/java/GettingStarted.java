@@ -1,17 +1,14 @@
 import org.hyperledger.indy.sdk.IndyException;
-import org.hyperledger.indy.sdk.anoncreds.Anoncreds;
-import org.hyperledger.indy.sdk.anoncreds.AnoncredsResults;
 import org.hyperledger.indy.sdk.crypto.Crypto;
 import org.hyperledger.indy.sdk.crypto.CryptoResults;
 import org.hyperledger.indy.sdk.did.DidResults;
 import org.hyperledger.indy.sdk.pool.Pool;
 import org.hyperledger.indy.sdk.wallet.Wallet;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import utils.PoolUtils;
 
 import java.nio.charset.Charset;
-import java.sql.Time;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -186,7 +183,157 @@ public class GettingStarted {
         System.out.println("'Alice' -> Store 'Transcript' Claim for Faber");
         proverStoreClaim(aliceOnboarding.getToWallet(), new String(authDecryptIssuerCreateClaimResult, Charset.forName("utf8")), null).get();
 
+        System.out.println("Apply for the job with Acme - Onboarding");
+
+        OnboardingResult aliceAcmeOnboarding = onboard(pool, poolName, "Acme", acmeOnboarding.getToWallet(), acmeDid, "Alice", aliceOnboarding.getToWallet(), "alice_wallet");
+
+        System.out.println("Apply for the job with Acme - Transcript proving");
+
+        System.out.println("'Acme' -> Create 'Job-Application' Proof request");
+
+        JSONObject jobApplicationProofRequestJson = createJobApplicationProofRequest(Long.toString(System.currentTimeMillis()), "Job-Application", "0.1");
+        extendJobApplicationProofRequest(jobApplicationProofRequestJson, "first_name", null, null);
+        extendJobApplicationProofRequest(jobApplicationProofRequestJson, "last_name", null, null);
+        extendJobApplicationProofRequest(jobApplicationProofRequestJson, "degree", faberIssuer.getDid(), transcriptClaimOfferJson.getJSONObject("schema_key"));
+        extendJobApplicationProofRequest(jobApplicationProofRequestJson, "status", faberIssuer.getDid(), transcriptClaimOfferJson.getJSONObject("schema_key"));
+        extendJobApplicationProofRequest(jobApplicationProofRequestJson, "ssn", faberIssuer.getDid(), transcriptClaimOfferJson.getJSONObject("schema_key"));
+        extendJobApplicationProofRequest(jobApplicationProofRequestJson, "phone_number", null, null);
+        extendJobApplicationProofRequestWithPredicate(jobApplicationProofRequestJson, "average", ">=", 4, faberIssuer.getDid(),transcriptClaimOfferJson.getJSONObject("schema_key"));
+
+
+        System.out.println("'Acme' -> Get key for Alice did");
+        System.out.println(aliceAcmeOnboarding.getDecryptedConnectionResponse());
+        String aliceAcmeVerkey = keyForDid(pool, acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getDecryptedConnectionResponse().getString("did")).get();
+
+        System.out.println("'Acme' -> Authcrypt 'Job-Application' Proof request for Alice");
+
+        byte[] authcryptedJobApplicationProofRequest = Crypto.authCrypt(acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getFromToKey(),
+                aliceAcmeOnboarding.getToFromDidAndKey().getVerkey(), jobApplicationProofRequestJson.toString().getBytes(Charset.forName("utf8"))).get();
+
+        System.out.println("'Acme' -> Send authcrypted 'Job-Application' Proof Request to Alice");
+
+        System.out.println("'Alice' -> Authdecrypt 'Job-Application Proof Request from Acme");
+
+        CryptoResults.AuthDecryptResult authdecryptedJobApplicationProofRequest = Crypto.authDecrypt(aliceOnboarding.getToWallet(),
+                aliceAcmeOnboarding.getToFromDidAndKey().getVerkey(), authcryptedJobApplicationProofRequest).get();
+        
+        
+        System.out.println("'Alice' -> Get claims for 'Job-Application' Poor Request");
+        JSONObject claimsForJobApplicationProofRequest = new JSONObject(proverGetClaimsForProofReq(aliceOnboarding.getToWallet(),
+                new String(authdecryptedJobApplicationProofRequest.getDecryptedMessage(), Charset.forName("utf8"))).get());
+
+        Map<String, JSONObject> claimsForJobApplicationProof = extractClaimsFromRequest(claimsForJobApplicationProofRequest);
+
+        JSONObject entitiesFromLedger = getEntitiesFromLedger(pool, aliceOnboarding.getToFromDidAndKey().getDid(), claimsForJobApplicationProof, "Alice");
+        JSONObject schemasJson = entitiesFromLedger.getJSONObject("schemas");
+        JSONObject claimDefsJson = entitiesFromLedger.getJSONObject("claimDefs");
+
+
+        claimsForJobApplicationProof.forEach((item, value) -> System.out.println(item + " : " + value));
+        System.out.println("'Alice' -> Create 'Job-Application' Proof");
+
+        JSONObject jobApplicationRequestedClaimsJson = new JSONObject();
+        jobApplicationProofRequestJson.put("self_attested_attributes", new JSONObject("{'attr1_referent':'Alice', 'attr2_referent': 'Garcia', 'attr6_referent': '123-45-6789'}"));
+
+
+
+
+
+
+
     }
+
+    private static Map<String, JSONObject> extractClaimsFromRequest(JSONObject claimsForJobApplicationProofRequest) {
+        Map<String, JSONObject> claimsForJobApplicationProof = new HashMap<>();
+
+        // Gather claims for attributes
+        for (String key : claimsForJobApplicationProofRequest.getJSONObject("attrs").keySet()) {
+            JSONObject claimForAttr = claimsForJobApplicationProofRequest.getJSONObject("attrs").getJSONArray(key).getJSONObject(0);
+
+            claimsForJobApplicationProof.put(claimForAttr.getString("referent"), claimForAttr);
+        }
+
+        // Gather claims for predicates
+        for (String key : claimsForJobApplicationProofRequest.getJSONObject("predicates").keySet()) {
+            JSONObject claimForPredicate = claimsForJobApplicationProofRequest.getJSONObject("predicates").getJSONArray(key).getJSONObject(0);
+
+            claimsForJobApplicationProof.put(claimForPredicate.getString("referent"), claimForPredicate);
+        }
+        return claimsForJobApplicationProof;
+    }
+
+    private static JSONObject getEntitiesFromLedger(Pool pool, String did,  Map<String, JSONObject> identifiers, String actor) throws Exception {
+        JSONObject schemas = new JSONObject();
+        JSONObject claimDefs = new JSONObject();
+        for (String referent : identifiers.keySet()) {
+            JSONObject item = identifiers.get(referent);
+            System.out.printf("'%s' -> Get Claim Definition from Ledger\n", actor);
+
+            JSONObject schema = getSchemaByKey(pool, did, item.getJSONObject("schema_key")).get();
+            schemas.put(referent, schema);
+
+            System.out.printf("'%s' -> Get Claim Definition from Ledger\n", actor);
+            JSONObject claimDef = getClaimDef(pool, did, schema, item.getString("issuer_did"));
+            claimDefs.put(referent, claimDef);
+        }
+
+        JSONObject result = new JSONObject();
+        result.put("schemas", schemas);
+        result.put("claimDefs", claimDefs);
+        return result;
+    }
+
+    private static JSONObject createJobApplicationProofRequest(String nonce, String name, String version) {
+        JSONObject result = new JSONObject();
+        result.put("nonce", nonce);
+        result.put("name", name);
+        result.put("version", version);
+        result.put("requested_attrs", new JSONObject());
+        result.put("requested_predicates", new JSONObject());
+
+        return result;
+    }
+
+    private static void extendJobApplicationProofRequest(JSONObject request, String attributeName, String issuerDid, JSONObject schemaKey) {
+        // Find first unused property
+        int i = 1;
+        for (; i < 1000; i++) {
+            if (!request.getJSONObject("requested_attrs").has("attr" + i + "_referent")) {
+                break;
+            }
+        }
+
+        JSONObject referent = new JSONObject();
+        referent.put("name", attributeName);
+        if (issuerDid != null && schemaKey != null) {
+            JSONArray restrictions = new JSONArray();
+            restrictions.put(new JSONObject("{'issuer_did': " + issuerDid + ", 'schema_key': " + schemaKey + "}"));
+            referent.put("restrictions", restrictions);
+        }
+
+        request.getJSONObject("requested_attrs").put("attr" + i + "_referent", referent);
+    }
+
+    private static void extendJobApplicationProofRequestWithPredicate(JSONObject request, String attributeName, String pType, int value, String issuerDid, JSONObject schemaKey) {
+        // Find first unused property
+        int i = 1;
+        for (; i < 1000; i++) {
+            if (!request.getJSONObject("requested_predicates").has("predicate" + i + "_referent")) {
+                break;
+            }
+        }
+
+        JSONObject referent = new JSONObject();
+        referent.put("attr_name", attributeName);
+        referent.put("p_type", pType);
+        referent.put("value", value);
+        JSONArray restrictions = new JSONArray();
+        restrictions.put(new JSONObject("{'issuer_did': " + issuerDid + ", 'schema_key': " + schemaKey + "}"));
+        referent.put("restrictions", restrictions);
+
+        request.put("predicate" + i + "_referent", referent);
+    }
+
 
     private static JSONObject getClaimDef(Pool pool, String did, JSONObject schema, String issuerDid) throws Exception {
         System.out.println("Starting getClaimDef");
@@ -234,7 +381,7 @@ public class GettingStarted {
         connectionRequest.put("did", fromToDidAndKey.getDid());
         connectionRequest.put("nonce", Long.toString(System.currentTimeMillis()));
 
-        System.out.printf("\"%s\" -> Send Nym to Ledger for \"%s %s\"", from, from, to);
+        System.out.printf("\"%s\" -> Send Nym to Ledger for \"%s %s\"\n", from, from, to);
         sendNym(pool, fromWallet, fromDid, fromToDidAndKey.getDid(), fromToDidAndKey.getVerkey(), null).get();
 
         if (toWallet == null) {
@@ -246,24 +393,24 @@ public class GettingStarted {
         System.out.printf("\"%s\" -> Create and store in Wallet \"%s %s\"\n", to, to, from);
         DidResults.CreateAndStoreMyDidResult toFromDidAndKey = createAndStoreMyDid(toWallet, "{}").get();
 
-        System.out.printf("\"%s\" -> Get key for did from \"%s\" connection request", to, from);
+        System.out.printf("\"%s\" -> Get key for did from \"%s\" connection request\n", to, from);
         String fromToVerkey = keyForDid(pool, toWallet, connectionRequest.get("did")).get();
 
-        System.out.printf("\"%s\" -> Anoncrypt connection response for \"%s\" with \"%s %s\" DID, verkey and nonce", to, from, to, from);
+        System.out.printf("\"%s\" -> Anoncrypt connection response for \"%s\" with \"%s %s\" DID, verkey and nonce\n", to, from, to, from);
 
         Map<String, String> connectionResponse = createConnectionResponse(connectionRequest, toFromDidAndKey);
 
-        System.out.printf("\"%s\" -> Send anoncrypted connection response to \"%s\"", to, from);
+        System.out.printf("\"%s\" -> Send anoncrypted connection response to \"%s\"\n", to, from);
         byte[] anonCryptedConnectionResponse = Crypto.anonCrypt(fromToVerkey, new JSONObject(connectionResponse).toString().getBytes(Charset.forName("utf8"))).get();
 
-        System.out.printf("\"%s\" -> Anoncrypted connection response from \"%s\"", from, to);
+        System.out.printf("\"%s\" -> Anoncrypted connection response from \"%s\"\n", from, to);
 
-        Map<String, Object> receivedConnectionResponse = new JSONObject(new String(Crypto.anonDecrypt(fromWallet, fromToVerkey, anonCryptedConnectionResponse).get(), Charset.forName("utf8"))).toMap();
+        JSONObject receivedConnectionResponse = new JSONObject(new String(Crypto.anonDecrypt(fromWallet, fromToVerkey, anonCryptedConnectionResponse).get(), Charset.forName("utf8")));
 
-        System.out.printf("\"%s\" -> Authenticates \"%s\" by comparison of nonce", from, to);
-        assert receivedConnectionResponse.get("nonce").equals(connectionResponse.get("nonce"));
+        System.out.printf("\"%s\" -> Authenticates \"%s\" by comparison of nonce\n", from, to);
+        assert receivedConnectionResponse.getString("nonce").equals(connectionResponse.get("nonce"));
 
-        System.out.printf("\"%s\" -> Send Nym to Ledger for \"%s %s\" DID", from, to, from);
+        System.out.printf("\"%s\" -> Send Nym to Ledger for \"%s %s\" DID\n", from, to, from);
         sendNym(pool, fromWallet, fromDid, toFromDidAndKey.getDid(), toFromDidAndKey.getVerkey(), null);
 
         return new OnboardingResult(toWallet, toWalletName, fromToDidAndKey.getVerkey(), toFromDidAndKey, receivedConnectionResponse);
@@ -354,9 +501,9 @@ public class GettingStarted {
         String toWalletName;
         String fromToKey;
         DidResults.CreateAndStoreMyDidResult toFromDidAndKey;
-        Map<String, Object> decryptedConnectionResponse;
+        JSONObject decryptedConnectionResponse;
 
-        public OnboardingResult(Wallet toWallet, String toWalletName, String fromToKey, DidResults.CreateAndStoreMyDidResult toFromDidAndKey, Map<String, Object> decryptedConnectionResponse) {
+        public OnboardingResult(Wallet toWallet, String toWalletName, String fromToKey, DidResults.CreateAndStoreMyDidResult toFromDidAndKey, JSONObject decryptedConnectionResponse) {
             this.toWallet = toWallet;
             this.toWalletName = toWalletName;
             this.fromToKey = fromToKey;
@@ -380,7 +527,7 @@ public class GettingStarted {
             return toFromDidAndKey;
         }
 
-        public Map<String, Object> getDecryptedConnectionResponse() {
+        public JSONObject getDecryptedConnectionResponse() {
             return decryptedConnectionResponse;
         }
 
