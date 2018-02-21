@@ -202,11 +202,8 @@ public class GettingStarted {
         extendJobApplicationProofRequest(jobApplicationProofRequestJson, "phone_number", null, null);
         extendJobApplicationProofRequestWithPredicate(jobApplicationProofRequestJson, "average", ">=", 4, faberIssuer.getDid(),transcriptClaimOfferJson.getJSONObject("schema_key"));
 
-        System.out.println("JOB_APPLICATION_PROOF_REQUEST_JSON: " + jobApplicationProofRequestJson.toString());
-
-
         System.out.println("'Acme' -> Get key for Alice did");
-        String aliceAcmeVerkey = keyForDidWithLog(pool, acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getDecryptedConnectionResponse().getString("did"));
+        String aliceAcmeVerkey = keyForDid(pool, acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getDecryptedConnectionResponse().getString("did")).get();
 
         System.out.println("'Acme' -> Authcrypt 'Job-Application' Proof request for Alice");
 
@@ -275,15 +272,6 @@ public class GettingStarted {
         assert "123-45-6789".equals(authdecryptedJobApplicationProofJson.getJSONObject("requested_proof").getJSONObject("self_attested_attrs").getJSONArray("attr6_referent").get(1));
 
         assert verifierVerifyProof(jobApplicationProofRequestJson.toString(), authdecryptedJobApplicationProofJson.toString(), ledgerEntities.getJSONObject("schemas").toString(), ledgerEntities.getJSONObject("claimDefs").toString(), "{}").get();
-
-        System.out.println("Finished");
-    }
-
-    private static String keyForDidWithLog(Pool pool, Wallet wallet, String did) throws Exception {
-        System.out.println("Pool: " + pool + " Wallet: " + wallet + " Did: " + did);
-        String result = keyForDid(pool, wallet, did).get();
-        System.out.println("KeyForDid result: " + result);
-        return result;
     }
 
     private static JSONObject extractClaimsFromRequest(JSONObject claimsForJobApplicationProofRequest) {
@@ -384,9 +372,6 @@ public class GettingStarted {
 
 
     private static JSONObject getClaimDef(Pool pool, String did, JSONObject schema, String issuerDid) throws Exception {
-        System.out.println("Starting getClaimDef");
-        System.out.println("SCHEMA" + schema.toString());
-        System.out.println("issuerDid " + issuerDid);
         String claimDefTxn = buildGetClaimDefTxn(did, schema.getInt("seqNo"), "CL", issuerDid).get();
         String claimDefResponse = submitRequest(pool, claimDefTxn).get();
         return new JSONObject(claimDefResponse).getJSONObject("result");
@@ -442,7 +427,7 @@ public class GettingStarted {
         DidResults.CreateAndStoreMyDidResult toFromDidAndKey = createAndStoreMyDid(toWallet, "{}").get();
 
         System.out.printf("\"%s\" -> Get key for did from \"%s\" connection request\n", to, from);
-        String fromToVerkey = keyForDidWithLog(pool, toWallet, connectionRequest.get("did"));
+        String fromToVerkey = keyForDid(pool, toWallet, connectionRequest.get("did")).get();
 
         System.out.printf("\"%s\" -> Anoncrypt connection response for \"%s\" with \"%s %s\" DID, verkey and nonce\n", to, from, to, from);
 
@@ -519,8 +504,6 @@ public class GettingStarted {
 
     static CompletableFuture<String> sendSchema(Pool pool, Wallet wallet, String did, String schema) throws IndyException, ExecutionException, InterruptedException {
         String schemaRequest = buildSchemaRequest(did, schema).get();
-
-        System.out.println("SCHEMA_REQUEST: " + schemaRequest);
         return signAndSubmitRequest(pool, wallet, did, schemaRequest);
     }
 
@@ -538,9 +521,6 @@ public class GettingStarted {
         return getSchema(pool, submitterDid, schemaKey.getString("did"), createGetSchema(schemaKey.getString("name"), schemaKey.getString("version")));
     }
     static CompletableFuture<JSONObject> getSchema(Pool pool, String submitterdDid, String destinationDid, String request) throws Exception {
-        System.out.println("destinationDid " + destinationDid);
-        System.out.println("request " + request);
-
         String getSchemaRequest = buildGetSchemaRequest(submitterdDid, destinationDid, request).get();
         return submitRequest(pool, getSchemaRequest).thenApply(rawJson -> new JSONObject(rawJson).getJSONObject("result"));
     }
