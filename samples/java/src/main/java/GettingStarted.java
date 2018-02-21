@@ -202,8 +202,9 @@ public class GettingStarted {
         extendJobApplicationProofRequest(jobApplicationProofRequestJson, "phone_number", null, null);
         extendJobApplicationProofRequestWithPredicate(jobApplicationProofRequestJson, "average", ">=", 4, faberIssuer.getDid(),transcriptClaimOfferJson.getJSONObject("schema_key"));
 
+        System.out.println("JOB_APPLICATION_PROOF_REQUEST_JSON: " + jobApplicationProofRequestJson.toString());
 
-        Thread.sleep(100);
+
         System.out.println("'Acme' -> Get key for Alice did");
         String aliceAcmeVerkey = keyForDidWithLog(pool, acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getDecryptedConnectionResponse().getString("did"));
 
@@ -235,14 +236,29 @@ public class GettingStarted {
         System.out.println("'Alice' -> Create 'Job-Application' Proof");
 
         JSONObject jobApplicationRequestedClaimsJson = new JSONObject();
-        jobApplicationProofRequestJson.put("self_attested_attributes", new JSONObject("{'attr1_referent':'Alice', 'attr2_referent': 'Garcia', 'attr6_referent': '123-45-6789'}"));
+        jobApplicationRequestedClaimsJson.put("self_attested_attributes", new JSONObject("{'attr1_referent':'Alice', 'attr2_referent': 'Garcia', 'attr6_referent': '123-45-6789'}"));
+
+        JSONObject requestedAttrs = new JSONObject();
+        requestedAttrs.put("attr3_referent", new JSONArray("['" + claimsForJobApplicationProofRequest.getJSONObject("attrs").getJSONArray("attr3_referent").getJSONObject(0).getString("referent") + "', true]"));
+        requestedAttrs.put("attr4_referent", new JSONArray("['" + claimsForJobApplicationProofRequest.getJSONObject("attrs").getJSONArray("attr4_referent").getJSONObject(0).getString("referent") + "', true]"));
+        requestedAttrs.put("attr5_referent", new JSONArray("['" + claimsForJobApplicationProofRequest.getJSONObject("attrs").getJSONArray("attr5_referent").getJSONObject(0).getString("referent") + "', true]"));
+
+
+        jobApplicationRequestedClaimsJson.put("requested_attrs", requestedAttrs);
+
+
+        System.out.println("PREDICATES " + claimsForJobApplicationProofRequest.getJSONObject("predicates").toString());
+        jobApplicationRequestedClaimsJson.put("requested_predicates", new JSONObject("{'predicate1_referent': '" + claimsForJobApplicationProofRequest.getJSONObject("predicates").getJSONArray("predicate1_referent").getJSONObject(0).getString("referent") + "'}" ));
+
+
+        String jobApplicationProofJson = proverCreateProof(aliceOnboarding.getToWallet(), new String(authdecryptedJobApplicationProofRequest.getDecryptedMessage(), Charset.forName("utf8")),
+                jobApplicationRequestedClaimsJson.toString(), schemasJson.toString(), aliceMasterSecretName, claimDefsJson.toString(), "{}").get();
+
+        System.out.println("'Alice' -> Authcrypt 'Job-Application' Proof for Acme");
 
 
 
-
-
-
-
+        System.out.println(jobApplicationProofJson);
     }
 
     private static String keyForDidWithLog(Pool pool, Wallet wallet, String did) throws Exception {
@@ -345,7 +361,7 @@ public class GettingStarted {
         restrictions.put(new JSONObject("{'issuer_did': " + issuerDid + ", 'schema_key': " + schemaKey + "}"));
         referent.put("restrictions", restrictions);
 
-        request.put("predicate" + i + "_referent", referent);
+        request.getJSONObject("requested_predicates").put("predicate" + i + "_referent", referent);
     }
 
 
@@ -425,7 +441,7 @@ public class GettingStarted {
         assert receivedConnectionResponse.getString("nonce").equals(connectionResponse.get("nonce"));
 
         System.out.printf("\"%s\" -> Send Nym to Ledger for \"%s %s\" DID\n", from, to, from);
-        sendNym(pool, fromWallet, fromDid, toFromDidAndKey.getDid(), toFromDidAndKey.getVerkey(), null);
+        sendNym(pool, fromWallet, fromDid, toFromDidAndKey.getDid(), toFromDidAndKey.getVerkey(), null).get();
 
         OnboardingResult result = new OnboardingResult(toWallet, toWalletName, fromToDidAndKey.getVerkey(), toFromDidAndKey, receivedConnectionResponse);
         System.out.println("Finished onboarding: " + result);
