@@ -225,14 +225,12 @@ public class GettingStarted {
         JSONObject claimsForJobApplicationProofRequest = new JSONObject(proverGetClaimsForProofReq(aliceOnboarding.getToWallet(),
                 new String(authdecryptedJobApplicationProofRequest.getDecryptedMessage(), Charset.forName("utf8"))).get());
 
-        Map<String, JSONObject> claimsForJobApplicationProof = extractClaimsFromRequest(claimsForJobApplicationProofRequest);
+        JSONObject claimsForJobApplicationProof = extractClaimsFromRequest(claimsForJobApplicationProofRequest);
 
         JSONObject entitiesFromLedger = getEntitiesFromLedger(pool, aliceOnboarding.getToFromDidAndKey().getDid(), claimsForJobApplicationProof, "Alice");
         JSONObject schemasJson = entitiesFromLedger.getJSONObject("schemas");
         JSONObject claimDefsJson = entitiesFromLedger.getJSONObject("claimDefs");
 
-
-        claimsForJobApplicationProof.forEach((item, value) -> System.out.println(item + " : " + value));
         System.out.println("'Alice' -> Create 'Job-Application' Proof");
 
         JSONObject jobApplicationRequestedClaimsJson = new JSONObject();
@@ -255,10 +253,30 @@ public class GettingStarted {
                 jobApplicationRequestedClaimsJson.toString(), schemasJson.toString(), aliceMasterSecretName, claimDefsJson.toString(), "{}").get();
 
         System.out.println("'Alice' -> Authcrypt 'Job-Application' Proof for Acme");
+        byte[] authcryptedJobApplicationProofJson = Crypto.authCrypt(aliceOnboarding.getToWallet(), aliceAcmeOnboarding.getToFromDidAndKey().getVerkey(), aliceAcmeOnboarding.getFromToKey(), jobApplicationProofJson.getBytes(Charset.forName("utf8"))).get();
+
+        System.out.println("'Alice' -> Send authcrypted 'Job-Application' Proof to Acme");
+
+        System.out.println("'Acme' -> Authdecrypted 'Job-Application' Proof from Alice");
+        byte[] authdecryptedJobApplicationProof = Crypto.authDecrypt(acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getFromToKey(), authcryptedJobApplicationProofJson).get().getDecryptedMessage();
+
+        JSONObject authdecryptedJobApplicationProofJson = new JSONObject(new String(authdecryptedJobApplicationProof, Charset.forName("utf8")));
+
+        JSONObject ledgerEntities = getEntitiesFromLedger(pool, acmeOnboarding.getToFromDidAndKey().getDid(), authdecryptedJobApplicationProofJson.getJSONObject("identifiers"), "Acme");
 
 
+        System.out.println("'Acme' -> Verify 'Job-Application' Proof from Alice");
+        assert "Bachelor of Science, Marketing".equals(authdecryptedJobApplicationProofJson.getJSONObject("requested_proof").getJSONObject("revealed_attrs").getJSONArray("attr3_referent").get(1));
+        assert "graduated".equals(authdecryptedJobApplicationProofJson.getJSONObject("requested_proof").getJSONObject("revealed_attrs").getJSONArray("attr4_referent").get(1));
+        assert "123-45-6789".equals(authdecryptedJobApplicationProofJson.getJSONObject("requested_proof").getJSONObject("revealed_attrs").getJSONArray("attr5_referent").get(1));
 
-        System.out.println(jobApplicationProofJson);
+        assert "Alice".equals(authdecryptedJobApplicationProofJson.getJSONObject("requested_proof").getJSONObject("self_attested_attrs").getJSONArray("attr1_referent").get(1));
+        assert "Garcia".equals(authdecryptedJobApplicationProofJson.getJSONObject("requested_proof").getJSONObject("self_attested_attrs").getJSONArray("attr2_referent").get(1));
+        assert "123-45-6789".equals(authdecryptedJobApplicationProofJson.getJSONObject("requested_proof").getJSONObject("self_attested_attrs").getJSONArray("attr6_referent").get(1));
+
+        assert verifierVerifyProof(jobApplicationProofRequestJson.toString(), authdecryptedJobApplicationProofJson.toString(), ledgerEntities.getJSONObject("schemas").toString(), ledgerEntities.getJSONObject("claimDefs").toString(), "{}").get();
+
+        System.out.println("Finished");
     }
 
     private static String keyForDidWithLog(Pool pool, Wallet wallet, String did) throws Exception {
@@ -268,8 +286,8 @@ public class GettingStarted {
         return result;
     }
 
-    private static Map<String, JSONObject> extractClaimsFromRequest(JSONObject claimsForJobApplicationProofRequest) {
-        Map<String, JSONObject> claimsForJobApplicationProof = new HashMap<>();
+    private static JSONObject extractClaimsFromRequest(JSONObject claimsForJobApplicationProofRequest) {
+        JSONObject claimsForJobApplicationProof = new JSONObject();
 
         // Gather claims for attributes
         for (String key : claimsForJobApplicationProofRequest.getJSONObject("attrs").keySet()) {
@@ -292,11 +310,11 @@ public class GettingStarted {
         return claimsForJobApplicationProof;
     }
 
-    private static JSONObject getEntitiesFromLedger(Pool pool, String did,  Map<String, JSONObject> identifiers, String actor) throws Exception {
+    private static JSONObject getEntitiesFromLedger(Pool pool, String did, JSONObject identifiers, String actor) throws Exception {
         JSONObject schemas = new JSONObject();
         JSONObject claimDefs = new JSONObject();
         for (String referent : identifiers.keySet()) {
-            JSONObject item = identifiers.get(referent);
+            JSONObject item = identifiers.getJSONObject(referent);
             System.out.printf("'%s' -> Get Claim Definition from Ledger\n", actor);
 
             JSONObject schema = getSchemaByKey(pool, did, item.getJSONObject("schema_key")).get();
