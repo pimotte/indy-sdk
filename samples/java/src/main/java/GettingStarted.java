@@ -1,10 +1,12 @@
 import org.hyperledger.indy.sdk.IndyException;
 import org.hyperledger.indy.sdk.crypto.Crypto;
 import org.hyperledger.indy.sdk.crypto.CryptoResults;
+import org.hyperledger.indy.sdk.did.Did;
 import org.hyperledger.indy.sdk.did.DidResults;
 import org.hyperledger.indy.sdk.pool.Pool;
 import org.hyperledger.indy.sdk.wallet.Wallet;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import utils.PoolUtils;
 
@@ -201,14 +203,14 @@ public class GettingStarted {
         extendJobApplicationProofRequestWithPredicate(jobApplicationProofRequestJson, "average", ">=", 4, faberIssuer.getDid(),transcriptClaimOfferJson.getJSONObject("schema_key"));
 
 
+        Thread.sleep(100);
         System.out.println("'Acme' -> Get key for Alice did");
-        System.out.println(aliceAcmeOnboarding.getDecryptedConnectionResponse());
-        String aliceAcmeVerkey = keyForDid(pool, acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getDecryptedConnectionResponse().getString("did")).get();
+        String aliceAcmeVerkey = keyForDidWithLog(pool, acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getDecryptedConnectionResponse().getString("did"));
 
         System.out.println("'Acme' -> Authcrypt 'Job-Application' Proof request for Alice");
 
         byte[] authcryptedJobApplicationProofRequest = Crypto.authCrypt(acmeOnboarding.getToWallet(), aliceAcmeOnboarding.getFromToKey(),
-                aliceAcmeOnboarding.getToFromDidAndKey().getVerkey(), jobApplicationProofRequestJson.toString().getBytes(Charset.forName("utf8"))).get();
+                aliceAcmeVerkey, jobApplicationProofRequestJson.toString().getBytes(Charset.forName("utf8"))).get();
 
         System.out.println("'Acme' -> Send authcrypted 'Job-Application' Proof Request to Alice");
 
@@ -243,14 +245,26 @@ public class GettingStarted {
 
     }
 
+    private static String keyForDidWithLog(Pool pool, Wallet wallet, String did) throws Exception {
+        System.out.println("Pool: " + pool + " Wallet: " + wallet + " Did: " + did);
+        String result = keyForDid(pool, wallet, did).get();
+        System.out.println("KeyForDid result: " + result);
+        return result;
+    }
+
     private static Map<String, JSONObject> extractClaimsFromRequest(JSONObject claimsForJobApplicationProofRequest) {
         Map<String, JSONObject> claimsForJobApplicationProof = new HashMap<>();
 
         // Gather claims for attributes
         for (String key : claimsForJobApplicationProofRequest.getJSONObject("attrs").keySet()) {
-            JSONObject claimForAttr = claimsForJobApplicationProofRequest.getJSONObject("attrs").getJSONArray(key).getJSONObject(0);
+            try {
+                JSONObject claimForAttr = claimsForJobApplicationProofRequest.getJSONObject("attrs").getJSONArray(key).getJSONObject(0);
 
-            claimsForJobApplicationProof.put(claimForAttr.getString("referent"), claimForAttr);
+                claimsForJobApplicationProof.put(claimForAttr.getString("referent"), claimForAttr);
+            }
+            catch (JSONException e) {
+                System.out.println("Ignoring key: " + key + " due to Exception: " + e.getMessage());
+            }
         }
 
         // Gather claims for predicates
@@ -394,7 +408,7 @@ public class GettingStarted {
         DidResults.CreateAndStoreMyDidResult toFromDidAndKey = createAndStoreMyDid(toWallet, "{}").get();
 
         System.out.printf("\"%s\" -> Get key for did from \"%s\" connection request\n", to, from);
-        String fromToVerkey = keyForDid(pool, toWallet, connectionRequest.get("did")).get();
+        String fromToVerkey = keyForDidWithLog(pool, toWallet, connectionRequest.get("did"));
 
         System.out.printf("\"%s\" -> Anoncrypt connection response for \"%s\" with \"%s %s\" DID, verkey and nonce\n", to, from, to, from);
 
@@ -413,7 +427,9 @@ public class GettingStarted {
         System.out.printf("\"%s\" -> Send Nym to Ledger for \"%s %s\" DID\n", from, to, from);
         sendNym(pool, fromWallet, fromDid, toFromDidAndKey.getDid(), toFromDidAndKey.getVerkey(), null);
 
-        return new OnboardingResult(toWallet, toWalletName, fromToDidAndKey.getVerkey(), toFromDidAndKey, receivedConnectionResponse);
+        OnboardingResult result = new OnboardingResult(toWallet, toWalletName, fromToDidAndKey.getVerkey(), toFromDidAndKey, receivedConnectionResponse);
+        System.out.println("Finished onboarding: " + result);
+        return result;
     }
 
     private static Map<String, String> createConnectionResponse(Map<String, String> connectionRequest, DidResults.CreateAndStoreMyDidResult toFromDidAndKey) {
