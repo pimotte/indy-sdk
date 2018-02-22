@@ -1,15 +1,15 @@
 package nl.quintor.studybits.indy.wrapper.dto;
 
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.ToString;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.*;
 import org.json.JSONObject;
 
+@Data
 @AllArgsConstructor
-@Getter
-@ToString
-public class ConnectionRequest {
+@NoArgsConstructor
+public class ConnectionRequest implements Serializable {
     private String did;
     private String nonce;
 }

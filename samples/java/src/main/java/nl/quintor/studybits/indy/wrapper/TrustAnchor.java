@@ -1,5 +1,6 @@
 package nl.quintor.studybits.indy.wrapper;
 
+import nl.quintor.studybits.indy.wrapper.dto.ConnectionRequest;
 import org.hyperledger.indy.sdk.IndyException;
 
 import java.util.concurrent.CompletableFuture;
@@ -13,12 +14,15 @@ public class TrustAnchor extends WalletOwner {
         super(name, pool, wallet);
     }
 
-    public CompletableFuture<String> createConnectionRequest(String newcomerName, String role) throws IndyException {
+    public CompletableFuture<ConnectionRequest> createConnectionRequest(String newcomerName, String role) throws IndyException {
         System.out.printf("\"%s\" -> Create and store in Wallet \"%s %s\"\n", name, name, newcomerName);
         return createAndStoreMyDid(wallet.getWallet(), "{}")
                 .thenCompose(wrapException(
                         (didResult) ->
-                                sendNym(didResult.getDid(), didResult.getVerkey(), role)
+                                sendNym(didResult.getDid(), didResult.getVerkey(), role).thenApply(
+                                        // TODO: Generate nonce properly
+                                        (nymResponse) -> new ConnectionRequest(didResult.getDid(), Long.toString(System.currentTimeMillis()))
+                                )
                         )
                 );
     }

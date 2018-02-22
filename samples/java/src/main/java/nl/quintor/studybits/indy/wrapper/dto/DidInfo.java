@@ -7,6 +7,6 @@ import lombok.ToString;
 @AllArgsConstructor
 @Getter
 @ToString
-public class DidInfo {
+public class DidInfo implements Serializable {
     private String seed;
 }

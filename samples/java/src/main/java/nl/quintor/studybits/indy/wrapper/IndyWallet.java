@@ -10,6 +10,7 @@ import org.hyperledger.indy.sdk.did.Did;
 import org.hyperledger.indy.sdk.did.DidResults;
 import org.hyperledger.indy.sdk.wallet.Wallet;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 public class IndyWallet implements AutoCloseable {
@@ -29,14 +30,19 @@ public class IndyWallet implements AutoCloseable {
         Wallet.createWallet(pool.getPoolName(), name, "default", null, null).get();
 
         IndyWallet indyWallet = new IndyWallet(name);
-        String seedJSON = StringUtils.isNotBlank(seed)  ? JSONUtil.mapper.writeValueAsString(new DidInfo(seed)) : "{}";
 
-        DidResults.CreateAndStoreMyDidResult result = Did.createAndStoreMyDid(indyWallet.wallet, seedJSON).get();
-
+        DidResults.CreateAndStoreMyDidResult result = indyWallet.newDid(seed).get();
         indyWallet.mainDid = result.getDid();
         indyWallet.verKey = result.getVerkey();
 
         return indyWallet;
+    }
+
+    public CompletableFuture<DidResults.CreateAndStoreMyDidResult> newDid(String seed) throws JsonProcessingException, IndyException {
+
+        String seedJSON = StringUtils.isNotBlank(seed)  ? (new DidInfo(seed)).toJSON() : "{}";
+
+        return Did.createAndStoreMyDid(wallet, seedJSON);
     }
 
     @Override
