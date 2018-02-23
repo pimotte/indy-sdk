@@ -21,7 +21,7 @@ public class IndyWallet implements AutoCloseable {
     @Getter
     private String mainDid;
     @Getter
-    private String verKey;
+    private String mainKey;
 
     public IndyWallet( String name ) throws IndyException, ExecutionException, InterruptedException {
         this.wallet = Wallet.openWallet(name, null, null).get();
@@ -35,7 +35,7 @@ public class IndyWallet implements AutoCloseable {
 
         DidResults.CreateAndStoreMyDidResult result = indyWallet.newDid(seed).get();
         indyWallet.mainDid = result.getDid();
-        indyWallet.verKey = result.getVerkey();
+        indyWallet.mainKey = result.getVerkey();
 
         return indyWallet;
     }
