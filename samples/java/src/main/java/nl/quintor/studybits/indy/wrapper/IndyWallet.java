@@ -2,8 +2,8 @@ package nl.quintor.studybits.indy.wrapper;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.Getter;
-import nl.quintor.studybits.indy.wrapper.dto.DidInfo;
-import nl.quintor.studybits.indy.wrapper.util.JSONUtil;
+import lombok.extern.slf4j.Slf4j;
+import nl.quintor.studybits.indy.wrapper.dto.MyDidInfo;
 import org.apache.commons.lang3.StringUtils;
 import org.hyperledger.indy.sdk.IndyException;
 import org.hyperledger.indy.sdk.did.Did;
@@ -13,12 +13,14 @@ import org.hyperledger.indy.sdk.wallet.Wallet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
+@Slf4j
 public class IndyWallet implements AutoCloseable {
     @Getter
     private Wallet wallet;
     private String name;
     @Getter
     private String mainDid;
+    @Getter
     private String verKey;
 
     public IndyWallet( String name ) throws IndyException, ExecutionException, InterruptedException {
@@ -38,10 +40,13 @@ public class IndyWallet implements AutoCloseable {
         return indyWallet;
     }
 
-    public CompletableFuture<DidResults.CreateAndStoreMyDidResult> newDid(String seed) throws JsonProcessingException, IndyException {
+    CompletableFuture<DidResults.CreateAndStoreMyDidResult> newDid() throws JsonProcessingException, IndyException {
+        return newDid(null);
+    }
 
-        String seedJSON = StringUtils.isNotBlank(seed)  ? (new DidInfo(seed)).toJSON() : "{}";
-
+    CompletableFuture<DidResults.CreateAndStoreMyDidResult> newDid(String seed) throws JsonProcessingException, IndyException {
+        String seedJSON = StringUtils.isNotBlank(seed)  ? (new MyDidInfo(seed)).toJSON() : "{}";
+        log.debug("Creating new did with seedJSON: {}", seedJSON);
         return Did.createAndStoreMyDid(wallet, seedJSON);
     }
 

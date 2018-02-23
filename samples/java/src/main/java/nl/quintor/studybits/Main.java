@@ -14,17 +14,16 @@ public class Main {
 
         String poolName = PoolUtils.createPoolLedgerConfig();
 
-        try (IndyPool indyPool = new IndyPool(poolName)) {
-            TrustAnchor steward = new TrustAnchor("Steward", indyPool, IndyWallet.create(indyPool, "steward_wallet", "000000000000000000000000Steward1"));
+        IndyPool indyPool = new IndyPool(poolName);
+        TrustAnchor steward = new TrustAnchor("Steward", indyPool, IndyWallet.create(indyPool, "steward_wallet", "000000000000000000000000Steward1"));
 
-            String governmentConnectionRequest = steward.createConnectionRequest("Government", "TRUST_ANCHOR").get().toJSON();
+        String governmentConnectionRequest = steward.createConnectionRequest("Government", "TRUST_ANCHOR").get().toJSON();
 
-            TrustAnchor government = new TrustAnchor("Government", indyPool, IndyWallet.create(indyPool, "government_wallet",null));
+        TrustAnchor government = new TrustAnchor("Government", indyPool, IndyWallet.create(indyPool, "government_wallet",null));
 
-            byte[] governmentConnectionResponse = government.acceptConnectionRequest(JSONUtil.mapper.readValue(governmentConnectionRequest, ConnectionRequest.class)).get();
+        byte[] governmentConnectionResponse = government.acceptConnectionRequest(JSONUtil.mapper.readValue(governmentConnectionRequest, ConnectionRequest.class)).get();
 
-        }
-
+        steward.acceptConnectionResponse(governmentConnectionResponse, JSONUtil.mapper.readValue(governmentConnectionRequest, ConnectionRequest.class).getNonce()).get();
 
     }
 }
