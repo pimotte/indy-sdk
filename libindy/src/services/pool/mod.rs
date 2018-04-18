@@ -1,8 +1,6 @@
 mod types;
 mod catchup;
 mod transaction_handler;
-#[warn(dead_code)]
-#[warn(unused_variables)]
 mod state_proof;
 
 extern crate byteorder;
@@ -12,7 +10,7 @@ extern crate rand;
 extern crate rust_base58;
 extern crate sha2;
 extern crate time;
-extern crate zmq_pw as zmq;
+extern crate zmq;
 extern crate rmp_serde;
 extern crate indy_crypto;
 
@@ -78,7 +76,7 @@ impl PoolWorkerHandler {
     fn process_msg(&mut self, raw_msg: &String, src_ind: usize) -> Result<Option<MerkleTree>, PoolError> {
         let msg = Message::from_raw_str(raw_msg)
             .map_err(map_err_trace!())
-            .map_err(|err|
+            .map_err(|_|
                 CommonError::IOError(
                     io::Error::from(io::ErrorKind::InvalidData)))?;
         match self {
@@ -89,7 +87,7 @@ impl PoolWorkerHandler {
 
     fn send_request(&mut self, cmd: &str, cmd_id: i32) -> Result<(), PoolError> {
         match self {
-            &mut PoolWorkerHandler::CatchupHandler(ref mut ch) => {
+            &mut PoolWorkerHandler::CatchupHandler(_) => {
                 Err(PoolError::CommonError(
                     CommonError::InvalidState("Try send request while CatchUp.".to_string())))
             }
@@ -272,7 +270,7 @@ impl PoolWorker {
                         CommandExecutor::instance()
                             .send(Command::Ledger(LedgerCommand::SubmitAck(req.id, Err(err))))
                             .map_err(|err| {
-                                CommonError::InvalidState("Can't send ACK cmd".to_string())
+                                CommonError::InvalidState(format!("Can't send ACK cmd: {:?}", err))
                             })
                     })?;
                 }
@@ -310,7 +308,7 @@ impl PoolWorker {
             trace!("cmd {:?}", cmd);
             let cmd_s = String::from_utf8(cmd[0].clone())
                 .map_err(|err|
-                    CommonError::InvalidState("Invalid command received".to_string()))?;
+                    CommonError::InvalidState(format!("Invalid command received: {:?}", err)))?;
             let id = cmd.get(1).map(|cmd: &Vec<u8>| LittleEndian::read_i32(cmd.as_slice()))
                 .unwrap_or(-1);
             if "exit".eq(cmd_s.as_str()) {
@@ -361,16 +359,20 @@ impl PoolWorker {
 
     fn _restore_merkle_tree_from_pool_name(pool_name: &str) -> Result<MerkleTree, PoolError> {
         let mut p = EnvironmentUtils::pool_path(pool_name);
-        let mt = MerkleTree::from_vec(Vec::new()).map_err(map_err_trace!())?;
         //TODO firstly try to deserialize merkle tree
         p.push(pool_name);
         p.set_extension("txn");
+
+        if !p.exists(){
+            return Err(PoolError::NotCreated(format!("Pool is not created for name: {:?}", pool_name)))
+        }
 
         PoolWorker::_restore_merkle_tree(&p)
     }
 
     fn _restore_merkle_tree(file_mame: &PathBuf) -> Result<MerkleTree, PoolError> {
         let mut mt = MerkleTree::from_vec(Vec::new()).map_err(map_err_trace!())?;
+
         let f = fs::File::open(file_mame).map_err(map_err_trace!())?;
 
         let reader = io::BufReader::new(&f);
@@ -408,11 +410,11 @@ impl Pool {
         let mut pool_worker: PoolWorker = PoolWorker {
             cmd_sock: recv_cmd_sock,
             open_cmd_id: cmd_id,
-            pool_id: pool_id,
+            pool_id,
             name: name.to_string(),
             handler: PoolWorkerHandler::CatchupHandler(CatchupHandler {
                 initiate_cmd_id: cmd_id,
-                pool_id: pool_id,
+                pool_id,
                 ..Default::default()
             }),
         };
@@ -476,7 +478,7 @@ impl Debug for RemoteNode {
 impl RemoteNode {
     fn new(txn: &NodeTransaction) -> Result<RemoteNode, PoolError> {
         let node_verkey = txn.dest.as_str().from_base58()
-            .map_err(|e| { CommonError::InvalidStructure("Invalid field dest in genesis transaction".to_string()) })?;
+            .map_err(|err| { CommonError::InvalidStructure(format!("Invalid field dest in genesis transaction: {:?}", err)) })?;
 
         if txn.data.services.is_none() || !txn.data.services.as_ref().unwrap().contains(&"VALIDATOR".to_string()) {
             return Err(PoolError::CommonError(CommonError::InvalidState("Node is not a Validator".to_string())));
@@ -490,9 +492,9 @@ impl RemoteNode {
         let blskey = match txn.data.blskey {
             Some(ref blskey) => {
                 let key = blskey.as_str().from_base58()
-                    .map_err(|e| { CommonError::InvalidStructure("Invalid field blskey in genesis transaction".to_string()) })?;
+                    .map_err(|err| { CommonError::InvalidStructure(format!("Invalid field blskey in genesis transaction: {:?}", err)) })?;
                 Some(VerKey::from_bytes(key.as_slice())
-                    .map_err(|e| { CommonError::InvalidStructure("Invalid field blskey in genesis transaction".to_string()) })?)
+                    .map_err(|err| { CommonError::InvalidStructure(format!("Invalid field blskey in genesis transaction: {:?}", err)) })?)
             }
             None => None
         };
@@ -509,10 +511,13 @@ impl RemoteNode {
 
     fn connect(&mut self, ctx: &zmq::Context, key_pair: &zmq::CurveKeyPair) -> Result<(), PoolError> {
         let s = ctx.socket(zmq::SocketType::DEALER)?;
-        s.set_identity(zmq::z85_encode(&key_pair.public_key).unwrap().as_bytes())?;
+        s.set_identity(key_pair.public_key.as_bytes())?;
         s.set_curve_secretkey(&key_pair.secret_key)?;
         s.set_curve_publickey(&key_pair.public_key)?;
-        s.set_curve_serverkey(self.public_key.as_slice())?;
+        s.set_curve_serverkey(
+            zmq::z85_encode(self.public_key.as_slice())
+                .map_err(|err| { CommonError::InvalidStructure(format!("Can't encode server key as z85: {:?}", err)) })?
+                .as_str())?;
         s.set_linger(0)?; //TODO set correct timeout
         s.connect(&self.zaddr)?;
         self.zsock = Some(s);
@@ -544,7 +549,7 @@ impl RemoteNode {
         info!("RemoteNode::send_str {} {}", self.name, str);
         self.zsock.as_ref()
             .ok_or(CommonError::InvalidState("Try to send str for unconnected RemoteNode".to_string()))?
-            .send(str, 0)
+            .send(str.as_bytes(), 0)
             .map_err(map_err_trace!())?;
         Ok(())
     }
@@ -621,7 +626,7 @@ impl PoolService {
         fs::remove_dir_all(path).map_err(PoolError::from)
     }
 
-    pub fn open(&self, name: &str, config: Option<&str>) -> Result<i32, PoolError> {
+    pub fn open(&self, name: &str, _config: Option<&str>) -> Result<i32, PoolError> {
         for pool in self.open_pools.try_borrow().map_err(CommonError::from)?.values() {
             if name.eq(pool.name.as_str()) {
                 //TODO change error
@@ -703,14 +708,14 @@ mod tests {
 
         #[test]
         fn pool_service_new_works() {
-            let pool_service = PoolService::new();
+            PoolService::new();
             assert!(true, "No crashes on PoolService::new");
         }
 
         #[test]
         fn pool_service_drop_works() {
             fn drop_test() {
-                let pool_service = PoolService::new();
+                PoolService::new();
             }
 
             drop_test();
@@ -892,7 +897,7 @@ mod tests {
         let mut pw: PoolWorker = Default::default();
         let (gt, handle) = nodes_emulator::start();
         let mut merkle_tree: MerkleTree = MerkleTree::from_vec(Vec::new()).unwrap();
-        merkle_tree.append(gt.to_msg_pack().unwrap()).unwrap();
+        merkle_tree.append(rmp_serde::to_vec_named(&gt).unwrap()).unwrap();
 
         pw.connect_to_known_nodes(Some(&merkle_tree)).unwrap();
 
@@ -951,7 +956,7 @@ mod tests {
         let handle: thread::JoinHandle<Vec<ZMQLoopAction>> = thread::spawn(move || {
             pw.poll_zmq().unwrap()
         });
-        send_cmd_sock.send("exit", zmq::DONTWAIT).expect("send");
+        send_cmd_sock.send("exit".as_bytes(), zmq::DONTWAIT).expect("send");
         let actions: Vec<ZMQLoopAction> = handle.join().unwrap();
 
         assert_eq!(actions.len(), 1);
@@ -982,7 +987,7 @@ mod tests {
     fn catchup_handler_start_catchup_works() {
         let mut ch: CatchupHandler = Default::default();
         let (gt, handle) = nodes_emulator::start();
-        ch.merkle_tree.append(gt.to_msg_pack().unwrap()).unwrap();
+        ch.merkle_tree.append(rmp_serde::to_vec_named(&gt).unwrap()).unwrap();
         let mut rn: RemoteNode = RemoteNode::new(&gt).unwrap();
         rn.connect(&zmq::Context::new(), &zmq::CurveKeyPair::new().unwrap()).unwrap();
         ch.nodes.push(rn);
@@ -1051,8 +1056,8 @@ mod tests {
                 dest: (&vk.0 as &[u8]).to_base58(),
             };
             let addr = format!("tcp://{}:{}", gt.data.client_ip.clone().unwrap(), gt.data.client_port.clone().unwrap());
-            s.set_curve_publickey(pkc.as_slice()).expect("set public key");
-            s.set_curve_secretkey(skc.as_slice()).expect("set secret key");
+            s.set_curve_publickey(&zmq::z85_encode(pkc.as_slice()).unwrap()).expect("set public key");
+            s.set_curve_secretkey(&zmq::z85_encode(skc.as_slice()).unwrap()).expect("set secret key");
             s.set_curve_server(true).expect("set curve server");
             s.bind(addr.as_str()).expect("bind");
             let handle = thread::spawn(move || {

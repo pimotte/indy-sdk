@@ -1,11 +1,11 @@
 import json
+import time
 
 from indy import ledger, did, wallet, pool
-from src.utils import get_pool_genesis_txn_path
+from src.utils import get_pool_genesis_txn_path, run_coroutine
 import logging
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 async def demo():
@@ -56,3 +56,8 @@ async def demo():
     await pool.delete_pool_ledger_config(pool_name)
 
     logger.info("Ledger sample -> completed")
+
+
+if __name__ == '__main__':
+    run_coroutine(demo)
+    time.sleep(1)  # FIXME waiting for libindy thread complete

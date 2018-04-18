@@ -29,9 +29,10 @@ use services::ledger::constants;
 use services::ledger::merkletree::merkletree::MerkleTree;
 use self::indy_crypto::bls::Generator;
 
-const REQUESTS_FOR_STATE_PROOFS: [&'static str; 4] = [constants::GET_NYM, constants::GET_SCHEMA, constants::GET_CLAIM_DEF, constants::GET_ATTR];
+const REQUESTS_FOR_STATE_PROOFS: [&'static str; 4] = [constants::GET_NYM, constants::GET_SCHEMA, constants::GET_CRED_DEF, constants::GET_ATTR];
 const RESENDABLE_REQUEST_TIMEOUT: i64 = 1;
-const REQUEST_TIMEOUT: i64 = 100;
+const REQUEST_TIMEOUT_ACK: i64 = 10;
+const REQUEST_TIMEOUT_REPLY: i64 = 100;
 
 pub struct TransactionHandler {
     gen: Generator,
@@ -41,7 +42,7 @@ pub struct TransactionHandler {
 }
 
 impl TransactionHandler {
-    pub fn process_msg(&mut self, msg: Message, raw_msg: &String, src_ind: usize) -> Result<Option<MerkleTree>, PoolError> {
+    pub fn process_msg(&mut self, msg: Message, raw_msg: &String, _src_ind: usize) -> Result<Option<MerkleTree>, PoolError> {
         match msg {
             Message::Reply(reply) => {
                 self.process_reply(reply.result.req_id, raw_msg);
@@ -49,11 +50,26 @@ impl TransactionHandler {
             Message::Reject(response) | Message::ReqNACK(response) => {
                 self.process_reject(&response, raw_msg);
             }
+            Message::ReqACK(ack) => {
+                self.process_ack(&ack, raw_msg);
+            }
             _ => {
                 warn!("unhandled msg {:?}", msg);
             }
         };
         Ok(None)
+    }
+
+    fn process_ack(&mut self, ack: &Response, raw_msg: &str) {
+        trace!("TransactionHandler::process_ack: >>> ack: {:?}, raw_msg: {:?}", ack, raw_msg);
+
+        self.pending_commands.get_mut(&ack.req_id).map(|cmd| {
+            debug!("TransactionHandler::process_ack: update timeout for req_id: {:?}", ack.req_id);
+            cmd.full_cmd_timeout
+                = Some(time::now_utc().add(Duration::seconds(REQUEST_TIMEOUT_REPLY)))
+        });
+
+        trace!("TransactionHandler::process_ack: <<<");
     }
 
     fn process_reply(&mut self, req_id: u64, raw_msg: &str) {
@@ -69,6 +85,9 @@ impl TransactionHandler {
         };
         let mut msg_result_without_proof: SJsonValue = msg_result.clone();
         msg_result_without_proof.as_object_mut().map(|obj| obj.remove("state_proof"));
+        if msg_result_without_proof["data"].is_object() {
+            msg_result_without_proof["data"].as_object_mut().map(|obj| obj.remove("stateProofFrom"));
+        }
         let msg_result_without_proof = HashableValue { inner: msg_result_without_proof };
 
         let reply_cnt = *self.pending_commands
@@ -184,7 +203,7 @@ impl TransactionHandler {
             nack_cnt: 0,
             replies: HashMap::new(),
             resendable_request: None,
-            full_cmd_timeout: Some(time::now_utc().add(Duration::seconds(REQUEST_TIMEOUT))),
+            full_cmd_timeout: Some(time::now_utc().add(Duration::seconds(REQUEST_TIMEOUT_ACK))),
         };
 
         if REQUESTS_FOR_STATE_PROOFS.contains(&req_json["operation"]["type"].as_str().unwrap_or("")) {
@@ -214,7 +233,7 @@ impl TransactionHandler {
                     CommonError::InvalidState(
                         "Can't flash all transaction requests with common success status".to_string())));
             }
-            Err(err) => {
+            Err(_) => {
                 for (_, pending_cmd) in &mut self.pending_commands {
                     pending_cmd.terminate_parent_cmds(false)?
                 }
@@ -302,13 +321,13 @@ impl TransactionHandler {
                     return None;
                 }
             }
-            constants::GET_CLAIM_DEF => {
+            constants::GET_CRED_DEF => {
                 if let (Some(sign_type), Some(sch_seq_no)) = (json_msg["signature_type"].as_str(),
                                                               json_msg["ref"].as_u64()) {
-                    trace!("TransactionHandler::parse_reply_for_proof_checking: GET_CLAIM_DEF sign_type {:?}, sch_seq_no: {:?}", sign_type, sch_seq_no);
+                    trace!("TransactionHandler::parse_reply_for_proof_checking: GET_CRED_DEF sign_type {:?}, sch_seq_no: {:?}", sign_type, sch_seq_no);
                     format!(":\x03:{}:{}", sign_type, sch_seq_no)
                 } else {
-                    trace!("TransactionHandler::parse_reply_for_proof_checking: <<< GET_CLAIM_DEF No key suffix");
+                    trace!("TransactionHandler::parse_reply_for_proof_checking: <<< GET_CRED_DEF No key suffix");
                     return None;
                 }
             }
@@ -388,7 +407,7 @@ impl TransactionHandler {
                     hasher.process(data.as_bytes());
                     value["val"] = SJsonValue::String(hasher.fixed_result().to_hex());
                 }
-                constants::GET_CLAIM_DEF => {
+                constants::GET_CRED_DEF => {
                     value["val"] = parsed_data;
                 }
                 constants::GET_SCHEMA => {
@@ -516,7 +535,7 @@ impl CommandProcess {
                 .send(Command::Ledger(LedgerCommand::SubmitAck(
                     *cmd_id,
                     Err(if is_timeout { PoolError::Timeout } else { PoolError::Terminate }))))
-                .map_err(|err| CommonError::InvalidState("Can't send ACK cmd".to_string()))?;
+                .map_err(|err| CommonError::InvalidState(format!("Can't send ACK cmd: {:?}", err)))?;
         }
         self.parent_cmd_ids.clear();
         Ok(())
@@ -530,6 +549,9 @@ mod tests {
 
     #[test]
     fn transaction_handler_process_reply_works() {
+        use utils::logger::LoggerUtils;
+        LoggerUtils::init();
+
         let mut th: TransactionHandler = Default::default();
         th.f = 1;
         let mut pc = CommandProcess {
@@ -583,7 +605,7 @@ mod tests {
         let cmd = format!("{{\"reqId\": {}}}", req_id);
 
         th.try_send_request(&cmd, cmd_id).unwrap();
-        let expected_timeout = time::now_utc().add(Duration::seconds(REQUEST_TIMEOUT));
+        let expected_timeout = time::now_utc().add(Duration::seconds(REQUEST_TIMEOUT_ACK));
 
         assert_eq!(th.pending_commands.len(), 1);
         let pending_cmd = th.pending_commands.get(&req_id).unwrap();

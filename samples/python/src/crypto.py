@@ -1,10 +1,13 @@
+import time
+
 from indy import did, crypto, wallet
 
 import json
 import logging
 
+from src.utils import run_coroutine
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 async def demo():
@@ -42,3 +45,8 @@ async def demo():
     await wallet.delete_wallet(wallet_name, None)
 
     logger.info("Crypto sample -> completed")
+
+
+if __name__ == '__main__':
+    run_coroutine(demo)
+    time.sleep(1)  # FIXME waiting for libindy thread complete
