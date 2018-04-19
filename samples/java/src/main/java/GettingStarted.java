@@ -376,14 +376,6 @@ public class GettingStarted {
         request.getJSONObject("requested_predicates").put("predicate" + i + "_referent", referent);
     }
 
-//
-//    private static JSONObject getClaimDef(Pool pool, String did, JSONObject schema, String issuerDid) throws Exception {
-//        String claimDefTxn = buildGetClaimDefTxn(did, schema.getInt("seqNo"), "CL", issuerDid).get();
-//        String claimDefResponse = submitRequest(pool, claimDefTxn).get();
-//        return new JSONObject(claimDefResponse).getJSONObject("result");
-//
-//    }
-
     private static void claimValuesWithNew(JSONObject base, String key, String actualValue, String integerValue) {
         JSONObject value =new JSONObject();
         value.put("raw", actualValue);
@@ -396,20 +388,6 @@ public class GettingStarted {
         String getCredDefResponse = submitRequest(pool, getCredDefRequest).get();
         System.out.println("GET CRED DEF: " + getCredDefResponse);
         return parseGetCredDefResponse(getCredDefResponse).get();
-    }
-
-
-    private static JSONObject createClaimOffer(String offerIssuerDid, String schemaIssuerDid, String name, String version) {
-        JSONObject claimOffer = new JSONObject();
-        claimOffer.put("issuer_did", offerIssuerDid);
-
-        Map<String, String> schemaKey = new HashMap<>();
-        schemaKey.put("did", schemaIssuerDid);
-        schemaKey.put("name", name);
-        schemaKey.put("version", version);
-
-        claimOffer.put("schema_key", schemaKey);
-        return claimOffer;
     }
 
     private static String createAndSendCredentialDef(Pool pool, Wallet wallet, String did, String schema) throws InterruptedException, ExecutionException, IndyException {
@@ -524,19 +502,6 @@ public class GettingStarted {
         return signAndSubmitRequest(pool, wallet, did, schemaRequest);
     }
 
-    static String createGetSchema(String name, String version) {
-        Map<String, Object> json = new HashMap<>();
-
-        json.put("name", name);
-        json.put("version", version);
-
-        return new JSONObject(json).toString();
-    }
-
-
-//    static CompletableFuture<JSONObject> getSchemaByKey(Pool pool, String submitterDid, JSONObject schemaKey) throws Exception {
-//        return getSchema(pool, submitterDid, schemaKey.getString("did"), createGetSchema(schemaKey.getString("name"), schemaKey.getString("version")));
-//    }
     static CompletableFuture<LedgerResults.ParseResponseResult> getSchema(Pool pool, String submitterdDid, String schemaId) throws Exception {
         String getSchemaRequest = buildGetSchemaRequest(submitterdDid, schemaId).get();
         String getSchemaResponse = submitRequest(pool, getSchemaRequest).get();
